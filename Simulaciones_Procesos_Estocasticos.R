@@ -1,7 +1,6 @@
 # Cargamos las librerías necesarias
 library(ggplot2)
 library(tidyr)
-library(usethis)
 
 simular_rw <- function(T_periods = 24, 
                        N_series = 100, 
@@ -69,26 +68,26 @@ simular_rw <- function(T_periods = 24,
 
 # Escenario 1: Sin Drift (Empezando en un precio de 50)
 grafico_sin_drift <- simular_rw(phi_0 = 0, 
-                                y_0 = 50,    # Nuevo valor inicial
-                                titulo = "Random Walk Puro (Valor Inicial = 50)",
+                                y_0 = 100,    # Nuevo valor inicial
+                                titulo = "Random Walk Puro",
                                 eje_x = "Meses", 
-                                eje_y = "Precio")
+                                eje_y = "Variable")
 print(grafico_sin_drift)
 
 # Escenario 2: Con Drift Positivo (Empezando en un índice base de 100)
 grafico_drift_pos <- simular_rw(phi_0 = 0.5, 
                                 y_0 = 100,   # Nuevo valor inicial
-                                titulo = "Random Walk Alcista (Valor Inicial = 100)",
-                                eje_x = "Semanas", 
-                                eje_y = "Índice de Precios")
+                                titulo = "Random Walk con tendencia positiva",
+                                eje_x = "Meses", 
+                                eje_y = "Variable")
 print(grafico_drift_pos)
 
 # Escenario 3: Con Drift Negativo (Empezando en 1000 reservas)
 grafico_drift_neg <- simular_rw(phi_0 = -0.5, 
-                                y_0 = 1000,  # Nuevo valor inicial
-                                titulo = "Random Walk Bajista (Valor Inicial = 1000)",
-                                eje_x = "Años", 
-                                eje_y = "Nivel de Reservas")
+                                y_0 = 100,  # Nuevo valor inicial
+                                titulo = "Random Walk con tendencia negativa",
+                                eje_x = "Meses", 
+                                eje_y = "Variable")
 print(grafico_drift_neg)
 
 #### Modelo Exponencial
