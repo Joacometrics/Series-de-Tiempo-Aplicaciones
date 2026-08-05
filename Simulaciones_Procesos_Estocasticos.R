@@ -2,11 +2,11 @@
 library(ggplot2)
 library(tidyr)
 
-simular_rw <- function(T_periods = 24, 
-                       N_series = 100, 
+simular_rw <- function(T_periods = 720, 
+                       N_series = 3, 
                        phi_0 = 0, 
                        y_0 = 0,      # <--- Este es el valor inicial
-                       sigma = 1,
+                       sigma = 4.130375,
                        titulo = "Simulación de Random Walks",
                        eje_x = "Tiempo (t)",
                        eje_y = expression(y[t])) {
@@ -75,8 +75,8 @@ grafico_sin_drift <- simular_rw(phi_0 = 0,
 print(grafico_sin_drift)
 
 # Escenario 2: Con Drift Positivo (Empezando en un índice base de 100)
-grafico_drift_pos <- simular_rw(phi_0 = 0.5, 
-                                y_0 = 100,   # Nuevo valor inicial
+grafico_drift_pos <- simular_rw(phi_0 = 0.34667, 
+                                y_0 = 50,   # Nuevo valor inicial
                                 titulo = "Random Walk con tendencia positiva",
                                 eje_x = "Meses", 
                                 eje_y = "Variable")
@@ -90,82 +90,151 @@ grafico_drift_neg <- simular_rw(phi_0 = -0.5,
                                 eje_y = "Variable")
 print(grafico_drift_neg)
 
-#### Modelo Exponencial
+library(quantmod)
+library(forecast)
+library(lmtest)
 
-simular_exponencial <- function(T_periods = 24, 
-                                N_series = 100, 
-                                r = 0.05,      # Tasa de crecimiento por período (ej. 5%)
-                                y_0 = 100,     # Valor inicial
-                                sigma = 0.17,  # Volatilidad del shock
-                                titulo = "Simulación: Tendencia Determinística con Shock Multiplicativo",
-                                eje_x = "Tiempo (t)",
-                                eje_y = expression(y[t])) {
+acciones <- c("AAPL", "MSFT", "NVDA")
+
+getSymbols(acciones)
+
+NVDA <- NVDA$NVDA.Adjusted["2024/"]
+
+summary(NVDA)
+
+data <- data.frame(NVDA = NVDA)
+
+model_arima <- Arima(data$NVDA, order = c(0,1,0), include.drift = TRUE)
+model_arima
+
+coeftest(model_arima)
   
-  # 1. Vector de tiempo
-  t_vec <- 0:T_periods
+drift_estimado <- coef(model_arima)
+sigma_estimado <- (model_arima$sigma2)^(1/2)
+
+
+library(ggplot2)
+library(tidyr)
+library(quantmod)
+
+simular_rw <- function(T_periods = NULL, 
+                       N_series = 3, 
+                       phi_0 = 0, 
+                       y_0 = 0,      
+                       sigma = 1,
+                       fechas = NULL,             # NUEVO: Vector de fechas
+                       serie_real = NULL,         # NUEVO: Datos reales para superponer
+                       mostrar_ci = TRUE,         # NUEVO: Toggle para el Intervalo
+                       mostrar_tendencia = TRUE,  # NUEVO: Toggle para la tendencia
+                       titulo = "Simulación de Random Walks",
+                       eje_x = "Tiempo",
+                       eje_y = expression(y[t])) {
   
-  # 2. Simulación de los shocks normales (epsilon_t)
-  # A diferencia del random walk, aquí los shocks NO se acumulan (no hay cumsum).
-  # Para t=0, forzamos el shock a 0 para que todas las series partan exactamente de y_0.
+  # Si se entregan fechas, calculamos los periodos automáticamente
+  if (!is.null(fechas)) {
+    T_periods <- length(fechas) - 1
+  } else if (is.null(T_periods)) {
+    T_periods <- 720
+    fechas <- 0:T_periods # Vector numérico por defecto si no hay fechas
+  }
+  
+  # 1. Simulación de los shocks (errores epsilon_t con distribución Normal)
   shocks <- matrix(rnorm(T_periods * N_series, mean = 0, sd = sigma), 
                    nrow = T_periods, ncol = N_series)
-  shocks <- rbind(rep(0, N_series), shocks) 
   
-  # 3. Construcción del proceso estocástico: y_t = y_0 * (1+r)^t * exp(epsilon_t)
-  tendencia <- y_0 * (1 + r)^t_vec
-  # Replicamos la tendencia para multiplicarla matricialmente con los shocks
-  tendencia_matriz <- matrix(rep(tendencia, N_series), ncol = N_series, byrow = FALSE)
+  # 2. Construcción de los Random Walks
+  cambios <- shocks + phi_0
+  rw_paths <- apply(cambios, 2, cumsum)
+  rw_paths <- rw_paths + y_0
+  rw_paths <- rbind(rep(y_0, N_series), rw_paths)
   
-  y_paths <- tendencia_matriz * exp(shocks)
+  # Creamos un vector de tiempo numérico para la fórmula matemática del CI
+  t_num <- 0:T_periods 
   
-  # 4. Intervalos de Confianza (95%) y Línea Central (Mediana)
-  # Utilizamos la fórmula exacta deducida anteriormente
-  limite_sup <- tendencia * exp(1.96 * sigma)
-  limite_inf <- tendencia * exp(-1.96 * sigma)
-  
-  # 5. Preparación de datos para graficar
-  df_paths <- as.data.frame(y_paths)
-  df_paths$t <- t_vec
-  df_largo <- pivot_longer(df_paths, cols = -t, names_to = "serie", values_to = "y")
-  
+  # 3. Datos para el Intervalo de Confianza y Tendencia
+  # CORRECCIÓN AQUÍ: Se genera una secuencia lineal espaciada de fechas 
+  # para evitar las ondulaciones causadas por los fines de semana.
   df_ci <- data.frame(
-    t = t_vec, 
-    tendencia = tendencia, 
-    sup = limite_sup, 
-    inf = limite_inf
+    t = seq(from = fechas[1], to = fechas[length(fechas)], length.out = length(fechas)),
+    media = y_0 + phi_0 * t_num,
+    sup = (y_0 + phi_0 * t_num) + 1.96 * sigma * sqrt(t_num),
+    inf = (y_0 + phi_0 * t_num) - 1.96 * sigma * sqrt(t_num)
   )
   
-  # Definimos el color base a Verde
-  color_verde <- "seagreen"
+  # 4. Preparación de datos simulados para graficar
+  df_paths <- as.data.frame(rw_paths)
+  df_paths$t <- fechas
+  df_largo <- pivot_longer(df_paths, cols = -t, names_to = "serie", values_to = "y")
   
-  # 6. Gráfico
+  color_azul <- "#2984D1"
+  
+  # 5. Construcción del Gráfico
   g <- ggplot() +
     # Trayectorias simuladas (alta transparencia)
     geom_line(data = df_largo, aes(x = t, y = y, group = serie), 
-              color = color_verde, alpha = 0.2) +
-    # Tendencia central determinística (continua, opaca y más gruesa)
-    geom_line(data = df_ci, aes(x = t, y = tendencia), 
-              color = color_verde, alpha = 1, linewidth = 0.8) +
-    # Límites del Intervalo de Confianza 95% (continuas y opacas)
-    geom_line(data = df_ci, aes(x = t, y = sup), 
-              color = color_verde, alpha = 1, linewidth = 0.8) +
-    geom_line(data = df_ci, aes(x = t, y = inf), 
-              color = color_verde, alpha = 1, linewidth = 0.8) +
-    theme_minimal() +
-    labs(title = titulo, x = eje_x, y = eje_y)
+              color = color_azul, alpha = 0.25)
+  
+  # Capa opcional: Tendencia Teórica
+  if (mostrar_tendencia) {
+    g <- g + geom_line(data = df_ci, aes(x = t, y = media), 
+                       color = "#2984D1", alpha = 1, linewidth = 0.8)
+  }
+  
+  # Capa opcional: Intervalos de Confianza (95%)
+  if (mostrar_ci) {
+    g <- g + 
+      geom_line(data = df_ci, aes(x = t, y = sup), 
+                color = "#2984D1", alpha = 1, linewidth = 0.8) +
+      geom_line(data = df_ci, aes(x = t, y = inf), 
+                color = "#2984D1", alpha = 1, linewidth = 0.8)
+  }
+  
+  # Capa opcional: Serie Real destacada
+  if (!is.null(serie_real)) {
+    # Nos aseguramos de que coincidan los largos
+    df_real <- data.frame(t = fechas, y = as.numeric(serie_real))
+    g <- g + geom_line(data = df_real, aes(x = t, y = y), 
+                       color = "#2984D1", alpha = 1, linewidth = 0.9)
+  }
+  
+  g <- g + theme_minimal() + labs(title = titulo, x = eje_x, y = eje_y)
   
   return(g)
 }
 
-# === EJECUCIÓN ===
+# (Asumiendo que ya tienes tu objeto NVDA cargado previamente con quantmod)
+# Extraemos la columna ajustada
+nvda_adj <- NVDA$NVDA.Adjusted
 
-# Simulamos el proceso asumiendo un crecimiento del 5% (r=0.05),
-# un valor inicial de 100, y una volatilidad de 0.15
-grafico_final <- simular_exponencial(r = 0.05, 
-                                     y_0 = 100, 
-                                     sigma = 0.17,
-                                     titulo = "Proceso Estocástico: y_t = y_0(1+r)^t e^{epsilon_t}",
-                                     eje_x = "Meses",
-                                     eje_y = "Precio")
+# 2. Extraemos las fechas y los valores reales como vectores para la función
+fechas_reales <- index(nvda_adj)
+valores_reales <- as.numeric(nvda_adj)
 
-print(grafico_final)
+# 3. ESTIMACIÓN DE COEFICIENTES (Random Walk con Drift)
+# Calculamos la diferencia diaria del precio
+diferencias_diarias <- diff(valores_reales)[-1] # [-1] quita el primer NA
+
+# Estimamos parámetros basándonos en los datos reales:
+precio_inicial <- valores_reales[1]         # Empezamos la simulación donde empezó el año
+
+hist(log(valores_reales))
+
+set.seed(123)
+# 4. EJECUTAMOS LA SIMULACIÓN
+simulacion_nvda <- simular_rw(
+  N_series = 10, 
+  phi_0 = 0,
+  y_0 = precio_inicial,  
+  sigma = sigma_estimado,
+  fechas = fechas_reales,        
+  serie_real = valores_reales,   
+  mostrar_ci = TRUE,             
+  mostrar_tendencia = TRUE,     
+  titulo = "NVDA con Drift Igual a Cero",
+  eje_x = "Fechas", 
+  eje_y = "Precio"
+)
+
+# Imprimir gráfico
+print(simulacion_nvda)
+
